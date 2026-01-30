@@ -1,4 +1,4 @@
-name: CI
+name: Build module
 on: [push]
 permissions:
   contents: write
