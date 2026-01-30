@@ -1,7 +1,10 @@
 name: Build module
-on: [push]
-permissions:
-  contents: write
+on:
+    push:
+        branches: [master]
+    pull_request:
+        branches: [master]
+    workflow_dispatch:
 
 jobs:
   build:
