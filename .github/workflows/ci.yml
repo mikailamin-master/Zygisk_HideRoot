@@ -1,0 +1,88 @@
+name: CI
+
+on:
+    push:
+
+permissions:
+    contents: write
+
+jobs:
+    build:
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+              with:
+                  submodules: recursive
+
+            - name: Setup Java
+              uses: actions/setup-java@v4
+              with:
+                  distribution: temurin
+                  java-version: 17
+
+            - name: Setup Gradle
+              uses: gradle/actions/setup-gradle@v3
+
+            - name: Build with Gradle
+              run: ./gradlew moduleZipRelease moduleZipDebug
+
+            - name: Set CI Variables
+              id: prepareArtifact
+              run: |
+                  release_file=$(ls module/build/outputs/zip/*-release.zip | head -n 1)
+                  debug_file=$(ls module/build/outputs/zip/*-debug.zip | head -n 1)
+
+                  echo "releaseFile=$release_file" >> $GITHUB_OUTPUT
+                  echo "debugFile=$debug_file" >> $GITHUB_OUTPUT
+
+                  echo "releaseName=$(basename $release_file .zip)" >> $GITHUB_OUTPUT
+                  echo "debugName=$(basename $debug_file .zip)" >> $GITHUB_OUTPUT
+
+            - name: Upload Release Artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: ${{ steps.prepareArtifact.outputs.releaseName }}
+                  path: ${{ steps.prepareArtifact.outputs.releaseFile }}
+
+            - name: Upload Debug Artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: ${{ steps.prepareArtifact.outputs.debugName }}
+                  path: ${{ steps.prepareArtifact.outputs.debugFile }}
+
+            - name: Install GitHub CLI
+              run: sudo apt update && sudo apt install gh -y
+
+            - name: Create GitHub Release
+              env:
+                  GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+              run: |
+                  tag="build"
+
+                  commit=$(git rev-parse --short HEAD)
+                  branch=${GITHUB_REF#refs/heads/}
+                  build_time=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+
+                  body=$(printf "Zygisk HideRoot automated build\n\nBranch: %s\nCommit: %s\nBuild time: %s\nActor: %s\nRepository: %s\n" \
+                      "$branch" \
+                      "$commit" \
+                      "$build_time" \
+                      "$GITHUB_ACTOR" \
+                      "$GITHUB_REPOSITORY")
+
+                  # delete old release + tag
+                  gh release delete "$tag" -y || true
+                  git tag -d "$tag" || true
+                  git push origin :refs/tags/$tag || true
+
+                  # create new tag
+                  git tag "$tag"
+                  git push origin "$tag"
+
+                  # create release with zip
+                  gh release create "$tag" \
+                      "${{ steps.prepareArtifact.outputs.releaseFile }}" \
+                      --title "Zygisk HideRoot Build" \
+                      --notes "$body"
